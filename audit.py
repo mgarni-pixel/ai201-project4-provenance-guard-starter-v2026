@@ -112,6 +112,18 @@ def log_rejection(creator_id: str, reason: str, **extra) -> dict:
     })
 
 
+def log_verification(creator_id: str, attestation: str, sample: str) -> dict:
+    """Record a writer earning the verified-human credential (stretch)."""
+    return _append({
+        "timestamp": _now(),
+        "creator_id": creator_id,
+        "event": "verified",
+        "status": "verified",
+        "attestation": attestation,
+        "sample": sample,
+    })
+
+
 def _append(entry: dict) -> dict:
     config.LOG_DIR.mkdir(parents=True, exist_ok=True)
     line = json.dumps(entry, ensure_ascii=False)
