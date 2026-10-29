@@ -54,8 +54,12 @@ DETECTOR_MAX_TOKENS = 400
 # down BEFORE you code it, and to put the numbers in your README. Whatever you
 # decide, it goes here.
 
+# Model signal gets the most weight: it is the steadiest. Style is next — a few
+# dashes or typos can move it. Stock phrases get the least: a word list is the
+# easiest of the three to dodge and the likeliest to hit formal human writers.
 WEIGHT_MODEL_SIGNAL = 0.5
-WEIGHT_STYLE_SIGNAL = 0.5
+WEIGHT_STYLE_SIGNAL = 0.3
+WEIGHT_PHRASE_SIGNAL = 0.2
 
 
 # ─── Thresholds (Milestone 5) ────────────────────────────────────────────────
@@ -72,7 +76,7 @@ WEIGHT_STYLE_SIGNAL = 0.5
 # that decide who pays for it.
 
 HUMAN_THRESHOLD = 0.35
-AI_THRESHOLD = 0.65
+AI_THRESHOLD = 0.85
 
 # ⚠️ One thing that catches people out in Milestone 5. A weighted average can
 # only land between its two inputs — so while `style_signal` is still the stub
