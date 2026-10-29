@@ -19,44 +19,22 @@ you claim, so that line should read `scoring.py::combine_signals`.
 import config
 
 
-def combine_signals(model_score: float, style_score: float) -> float:
+def combine_signals(model_score: float, style_score: float, phrase_score: float = 0.0) -> float:
     """
-    Combine two 0–1 signals into one 0–1 score. ← TODO (Milestone 4)
+    Combine the 0–1 signals into one 0–1 score. Higher = more likely AI.
 
-    Both inputs point the same way: higher means more likely AI. Your output
-    should too.
-
-    Args:
-        model_score: from `detector.model_signal` — how predictable the text is.
-        style_score: from `stylometry.style_signal` — the shape of the text.
-
-    Returns:
-        A float from 0.0 (confidently human) to 1.0 (confidently AI).
-
-    ⚠️ **Write the rule down before you code it, and put the numbers in your
-    README.** A weighted average is the obvious choice and it is not the only
-    one. Things worth thinking about:
-
-      - **What happens when they disagree?** One signal at 0.9 and the other at
-        0.1 averages to 0.5 — "unsure". Is that what you want? It might be
-        exactly right: two methods disagreeing IS uncertainty. Or you might
-        decide one signal is more trustworthy when they split.
-
-      - **Which way do you want to be wrong?** Weighting toward the signal that
-        reads more human means fewer false accusations and more AI text
-        getting through. There's no weighting that avoids the trade.
-
-      - Milestone 4 asks you to find a case where your two signals split and
-        write it down. That case is what this rule exists to handle.
-
-    The weights in config.py are placeholders. Change them, or ignore them and
-    write a different rule.
+    Rule: weighted average — model 0.5, style 0.3, stock phrases 0.2
+    (config.py). No separate disagreement rule is needed: with AI_THRESHOLD at
+    0.85, any two signals maxed out with the third at zero top out at 0.80, so
+    the AI label needs all three leaning AI. One signal, or even two, can never
+    accuse a writer on their own; a split lands in "unsure" or "human".
     """
-    # TODO: replace this
-    return (
+    score = (
         config.WEIGHT_MODEL_SIGNAL * model_score
         + config.WEIGHT_STYLE_SIGNAL * style_score
+        + config.WEIGHT_PHRASE_SIGNAL * phrase_score
     )
+    return min(max(score, 0.0), 1.0)
 
 
 def score_to_label(score: float) -> tuple[str, str]:
@@ -85,12 +63,27 @@ def score_to_label(score: float) -> tuple[str, str]:
     think if they got it on their own work. That question is the whole
     milestone.
     """
-    # TODO: replace this — thresholds are in config.py
     if score >= config.AI_THRESHOLD:
-        return "ai", "PLACEHOLDER — write the high-confidence AI label."
+        return "ai", LABEL_AI
     if score <= config.HUMAN_THRESHOLD:
-        return "human", "PLACEHOLDER — write the high-confidence human label."
-    return "unsure", "PLACEHOLDER — write the unsure label."
+        return "human", LABEL_HUMAN
+    return "unsure", LABEL_UNSURE
+
+
+LABEL_HUMAN = (
+    "This reads like it was written by a person. Our automated check found "
+    "nothing that suggests it was produced by an AI tool."
+)
+LABEL_UNSURE = (
+    "We can't tell how this was written. Our automated check gave mixed "
+    "results, which happens with a lot of genuine human writing, so we are "
+    "not making any claim about it either way."
+)
+LABEL_AI = (
+    "This looks a lot like text produced by an AI writing tool. This is an "
+    "automated estimate, not a final judgment, and it can be wrong. If you "
+    "wrote this yourself, you can appeal and a person will review it."
+)
 
 
 def label_ranges() -> list[tuple[str, str]]:
