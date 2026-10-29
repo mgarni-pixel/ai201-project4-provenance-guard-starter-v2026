@@ -34,6 +34,26 @@
 
 <!-- ═══════════════════════ UNIT 7 — THE BUILD ═══════════════════════ -->
 
+## Stretch Features (declared before building)
+
+I'm adding all three stretch features. I declared them here before writing
+any of their code:
+
+1. **A third signal: stock-phrase density** (`phrases.py::phrase_signal`).
+   It counts stock transition phrases per 100 words ("additionally", "overall",
+   "it is important to", "furthermore", and so on). This measures *word choice*,
+   which is different from predictability (signal one) and shape (signal two).
+   I'll write a note on how I weight the three.
+2. **`GET /content/<id>`** returns one item's current status: its decision,
+   whether it's `decided` or `under_review`, any appeals, and whether the
+   writer is verified.
+3. **A verified-human path.** `POST /verify` is an extra step where a writer
+   sends a signed attestation plus a writing sample of at least 50 words. Once
+   they pass, they hold a credential, and every item they submit carries a
+   `verified_human` badge in `/submit` and `/content/<id>`.
+
+---
+
 ## What This Does
 
 <!-- The path a submission takes, from arriving to the label a reader sees.
