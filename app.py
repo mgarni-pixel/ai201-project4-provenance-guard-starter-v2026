@@ -20,6 +20,8 @@ Routes:
     POST /ping        the worked example. Already works. Don't edit it
     POST /submit      ← YOU BUILD THIS (Milestone 3, 4, 5)
     POST /appeal      ← YOU BUILD THIS (Milestone 5)
+    GET  /content/<id>  one item's current status (stretch)
+    POST /verify      verified-human credential (stretch)
     GET  /log         the audit log. Already works
     GET  /health      is the service up, and is the model loaded
 """
@@ -199,17 +201,72 @@ def submit():
     what should this do when `text` is missing, empty, or enormous? A crash on
     a malformed input is one of the most common real failures there is.
     """
-    payload = request.get_json(silent=True) or {}
+    import detector
+    import phrases
+    import scoring
+    import stylometry
 
-    # TODO: delete this and build the route.
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return _reject("unknown", "invalid_json", "Send a JSON object with text and creator_id.")
+
+    creator_id = payload.get("creator_id")
+    if not isinstance(creator_id, str) or not creator_id.strip():
+        return _reject("unknown", "missing_creator_id", "creator_id is required.")
+
+    text = payload.get("text")
+    if text is None:
+        return _reject(creator_id, "missing_text", "text is required.")
+    if not isinstance(text, str):
+        return _reject(creator_id, "missing_text", "text must be a string.")
+    text = text.strip()
+    if not text:
+        return _reject(creator_id, "empty_text", "text is empty.")
+    if len(text) > MAX_TEXT_CHARS:
+        return _reject(creator_id, "text_too_long", f"text must be at most {MAX_TEXT_CHARS} characters.")
+
+    try:
+        model_score = detector.model_signal(text)
+    except ValueError:
+        return _reject(creator_id, "text_too_short", "Text is too short to judge — send a few sentences at least.")
+
+    style_score = stylometry.style_signal(text)
+    phrase_score = phrases.phrase_signal(text)
+    confidence = round(scoring.combine_signals(model_score, style_score, phrase_score), 4)
+    guess, label = scoring.score_to_label(confidence)
+
+    content_id = str(uuid.uuid4())
+    audit.log_decision(
+        content_id=content_id,
+        creator_id=creator_id,
+        guess=guess,
+        model_score=model_score,
+        style_score=style_score,
+        combined_score=confidence,
+        label=label,
+        phrase_score=phrase_score,
+        verified_human=_is_verified(creator_id),
+    )
     return jsonify({
-        "error": "not_implemented",
-        "message": "POST /submit isn't built yet — see the TODO in app.py.",
-        "you_sent": {
-            "text_length": len(payload.get("text", "")),
-            "creator_id": payload.get("creator_id"),
-        },
-    }), 501
+        "content_id": content_id,
+        "guess": guess,
+        "confidence": confidence,
+        "label": label,
+        "model_score": model_score,
+        "style_score": style_score,
+        "phrase_score": phrase_score,
+        "status": "decided",
+        "verified_human": _is_verified(creator_id),
+    })
+
+
+MAX_TEXT_CHARS = 20_000
+
+
+def _reject(creator_id: str, reason: str, message: str):
+    """A refused input still leaves a trace in the log."""
+    audit.log_rejection(creator_id=creator_id, reason=reason)
+    return jsonify({"error": reason, "message": message}), 400
 
 
 @app.post("/appeal")
@@ -232,14 +289,109 @@ def appeal():
     to the person on the other end. It's the only thing standing between a
     wrong accusation and nothing at all.
     """
-    payload = request.get_json(silent=True) or {}
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "invalid_json", "message": "Send a JSON object with content_id and reasoning."}), 400
 
-    # TODO: delete this and build the route.
+    content_id = payload.get("content_id")
+    reasoning = payload.get("reasoning")
+    if not isinstance(content_id, str) or not content_id.strip():
+        return jsonify({"error": "missing_content_id", "message": "content_id is required."}), 400
+    if not isinstance(reasoning, str) or not reasoning.strip():
+        return jsonify({"error": "missing_reasoning", "message": "Tell us why you think we got it wrong."}), 400
+
+    decisions = [e for e in audit.entries_for(content_id.strip()) if e.get("status") == "decided"]
+    if not decisions:
+        return jsonify({"error": "unknown_content_id", "message": "We have no submission with that content_id."}), 404
+
+    audit.log_appeal(content_id=content_id.strip(), creator_id=decisions[0]["creator_id"], reasoning=reasoning.strip())
     return jsonify({
-        "error": "not_implemented",
-        "message": "POST /appeal isn't built yet — see the TODO in app.py.",
-        "you_sent": payload,
-    }), 501
+        "content_id": content_id.strip(),
+        "status": "under_review",
+        "message": "Thanks — your appeal is recorded. A person will review this piece, "
+                   "and the label stays marked as under review until they do.",
+    })
+
+
+# ── Stretch: one item's status, and the verified-human path ──────────────────
+
+@app.get("/content/<content_id>")
+def content(content_id):
+    """One item's current status, rebuilt from the append-only log."""
+    entries = audit.entries_for(content_id)
+    decisions = [e for e in entries if e.get("status") == "decided"]
+    if not decisions:
+        return jsonify({"error": "unknown_content_id", "message": "We have no submission with that content_id."}), 404
+
+    decision = decisions[0]
+    appeals = [e for e in entries if e.get("event") == "appeal"]
+    return jsonify({
+        "content_id": content_id,
+        "creator_id": decision["creator_id"],
+        "status": entries[-1]["status"],
+        "guess": decision["guess"],
+        "confidence": decision["combined_score"],
+        "label": decision["label"],
+        "model_score": decision["model_score"],
+        "style_score": decision["style_score"],
+        "phrase_score": decision.get("phrase_score"),
+        "submitted_at": decision["timestamp"],
+        "appeals": [{"timestamp": a["timestamp"], "reasoning": a["reasoning"]} for a in appeals],
+        "verified_human": _is_verified(decision["creator_id"]),
+    })
+
+
+ATTESTATION = "I confirm that I write my own work and that I am a person."
+MIN_SAMPLE_WORDS = 50
+
+
+def _credential(creator_id: str) -> dict | None:
+    return next((e for e in audit.read_entries()
+                 if e.get("event") == "verified" and e.get("creator_id") == creator_id), None)
+
+
+def _is_verified(creator_id: str) -> bool:
+    return _credential(creator_id) is not None
+
+
+@app.post("/verify")
+def verify():
+    """
+    The extra step a writer takes to earn a verified-human credential.
+
+    Expects JSON:
+        {"creator_id": "...", "attestation": ATTESTATION, "sample": "50+ words"}
+
+    The sample is kept on record for a reviewer, and deliberately NOT scored:
+    plain writers are the ones the detector misjudges, and they shouldn't be
+    shut out of the credential by the same detector.
+    """
+    import stylometry
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "invalid_json", "message": "Send a JSON object with creator_id, attestation and sample."}), 400
+
+    creator_id = payload.get("creator_id")
+    attestation = payload.get("attestation")
+    sample = payload.get("sample")
+    if not isinstance(creator_id, str) or not creator_id.strip():
+        return jsonify({"error": "missing_creator_id", "message": "creator_id is required."}), 400
+    creator_id = creator_id.strip()
+    if not isinstance(attestation, str) or attestation.strip().lower() != ATTESTATION.lower():
+        return jsonify({"error": "attestation_mismatch", "message": f'attestation must read exactly: "{ATTESTATION}"'}), 400
+    if not isinstance(sample, str) or len(stylometry.words(sample)) < MIN_SAMPLE_WORDS:
+        return jsonify({"error": "sample_too_short", "message": f"sample must be at least {MIN_SAMPLE_WORDS} words of your own writing."}), 400
+
+    credential = _credential(creator_id)
+    if credential is None:
+        credential = audit.log_verification(creator_id, ATTESTATION, sample.strip())
+    return jsonify({
+        "creator_id": creator_id,
+        "verified_human": True,
+        "verified_at": credential["timestamp"],
+        "message": "You're verified. Everything you submit now shows a verified-human badge.",
+    })
 
 
 # ── Already works ─────────────────────────────────────────────────────────────
