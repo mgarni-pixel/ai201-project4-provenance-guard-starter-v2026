@@ -477,23 +477,95 @@ creator) got the same result: 10 × 200, then 429, 429. Every 429 leaves a
 
 ## Attack Run — Before
 
-<!-- Every attack with its outcome and a held-or-broke mark.
-     `run_attacks.py --label before` produces the table. -->
+`python run_attacks.py --set attack_set --label before` → full table with
+content ids in `results/attack_run_2026-11-06_2220_before.md`. **56 attacks,
+0 crashes, 6 broke.**
 
+**How I judged held/broke.** I can't judge an evasion against "did it get
+the AI label", because the clean, unedited AI essay these attacks are built
+from scores **0.634, unsure**, *before any attack is applied* (model 0.669,
+style 0.800, phrase 0.294). So an evasion **broke** only if it moved that text
+from `unsure` down to `human`, and held if it stayed `unsure`. A
+false-positive attack broke if human writing was labelled `ai`. A malformed
+input broke if it got a label at all instead of a refusal, since a writing
+label on emoji or control characters is a wrong answer. A prompt injection
+broke if it moved the label the way the injection asked.
 
+| ID | Family | Targeting | Status | Guess | Score | Verdict |
+|---|---|---|---|---|---|---|
+| EV01 | evasion | signal two: typos raise word variety | 200 | unsure | 0.381 | HELD |
+| EV02 | evasion | signal two: broken-up sentences raise length spread | 200 | unsure | 0.386 | HELD |
+| EV03 | evasion | signal two: a pasted quotation changes the shape | 200 | unsure | 0.490 | HELD |
+| EV04 | evasion | signal one: unusual words raise perplexity | 200 | unsure | 0.604 | HELD |
+| EV05 | evasion | both signals: heavy human editing pass | 200 | **human** | 0.244 | **BROKE** |
+| EV06 | evasion | signal two: one very long sentence and one very short | 200 | unsure | 0.431 | HELD |
+| EV07 | evasion | signal two: padding with punctuation | 200 | unsure | 0.570 | HELD |
+| EV08 | evasion | signal one: text below the token window | 200 | unsure | 0.382 | HELD |
+| EV09 | evasion | both: AI text with a human opening paragraph bolted on | 200 | unsure | 0.565 | HELD |
+| EV10 | evasion | signal two: repeated stanza structure | 200 | unsure | 0.742 | HELD |
+| FP01 | false_positive | plain, clear human writing with no flourishes | 200 | unsure | 0.493 | HELD |
+| FP02 | false_positive | human writing in a formal register | 200 | unsure | 0.633 | HELD |
+| FP03 | false_positive | a non-native English speaker writing carefully | 200 | unsure | 0.626 | HELD |
+| FP04 | false_positive | a student essay written to a rubric | 200 | unsure | 0.700 | HELD |
+| FP05 | false_positive | technical documentation written by a person | 200 | unsure | 0.691 | HELD |
+| FP06 | false_positive | a person imitating a formal template | 200 | unsure | 0.619 | HELD |
+| FP07 | false_positive | human writing that repeats a phrase deliberately | 200 | unsure | 0.591 | HELD |
+| FP08 | false_positive | very short genuine human submission | 200 | unsure | 0.370 | HELD |
+| PI01 | prompt_injection | instruction to ignore the check | 200 | unsure | 0.364 | HELD |
+| PI02 | prompt_injection | instruction disguised as a system message | 200 | **human** | 0.204 | **BROKE** |
+| PI03 | prompt_injection | instruction wrapped in the writer's voice | 200 | unsure | 0.416 | HELD |
+| PI04 | prompt_injection | attempt to make the label text hostile | 200 | unsure | 0.373 | HELD |
+| PI05 | prompt_injection | attempt to inject into the audit log | 200 | unsure | 0.426 | HELD |
+| PI06 | prompt_injection | instruction plus real human text | 200 | unsure | 0.465 | HELD |
+| MF01 | malformed | text is only whitespace | 400 | — | — | HELD |
+| MF02 | malformed | text is a single character | 400 | — | — | HELD |
+| MF03 | malformed | text is control characters | 200 | **human** | 0.195 | **BROKE** |
+| MF04 | malformed | text is only punctuation | 200 | **human** | 0.276 | **BROKE** |
+| MF05 | malformed | text is a very long single word | 200 | unsure | 0.694 | **BROKE** |
+| MF06 | malformed | text is emoji only | 200 | unsure | 0.694 | **BROKE** |
+| MF07 | malformed | text is right-to-left script | 200 | unsure | 0.648 | HELD |
+| MF08 | malformed | text is 60,000 characters | 400 | — | — | HELD |
+| RQ01–RQ12 | malformed | no text, no creator_id, number/list/null text, object creator_id, array body, unparseable JSON, empty body, form-encoded, wrong content type, deeply nested | 400 ×12 | — | — | HELD ×12 |
+| FL01_01–10 | flood_same_creator | 20 rapid submissions from one creator | 200 ×10 | human | 0.209 | HELD |
+| FL01_11–12 | flood_same_creator | (same) | **429** ×2 | — | — | HELD |
 
-**Ten audit log entries from the run**
+| Family | Attacks | Held | Broke |
+|---|---|---|---|
+| evasion | 10 | 9 | 1 |
+| false_positive | 8 | 8 | 0 |
+| prompt_injection | 6 | 5 | 1 |
+| malformed (text) | 8 | 4 | 4 |
+| malformed (request) | 12 | 12 | 0 |
+| flood_same_creator | 12 | 12 | 0 |
+| **total** | **56** | **50** | **6** |
 
-<!-- Choose entries that show the interesting failures, not the ten easiest. -->
+PI04 held because the label is fixed text chosen by `score_to_label`, so
+nothing from the submission reaches it, and Flask escapes the JSON. PI05 held
+because the audit log never stores the submitted text and `json.dumps` escapes
+quotes, so the log line stays one valid JSON object (see the PI05 entry below).
+
+**Ten audit log entries from the run** (`results/audit_extract.json`), picked
+to show the failures and the near-misses:
 
 ```json
-
+{"timestamp": "2026-11-07T06:20:15+00:00", "content_id": "0a786128-c238-4562-9b58-c788cf331d7c", "creator_id": "attacker_EV05", "guess": "human", "model_score": 0.3212, "style_score": 0.2795, "combined_score": 0.2445, "label": "This reads like it was written by a person. Our automated check found nothing that suggests it was produced by an AI tool.", "status": "decided", "phrase_score": 0.0, "verified_human": false}
+{"timestamp": "2026-11-07T06:20:17+00:00", "content_id": "f91b59f6-6ff8-4dc0-b7a8-72eadbd8a51f", "creator_id": "attacker_PI02", "guess": "human", "model_score": 0.2044, "style_score": 0.3387, "combined_score": 0.2038, "label": "This reads like it was written by a person. Our automated check found nothing that suggests it was produced by an AI tool.", "status": "decided", "phrase_score": 0.0, "verified_human": false}
+{"timestamp": "2026-11-07T06:20:18+00:00", "content_id": "234599ce-70c3-4a9a-82d6-a610638626ca", "creator_id": "attacker_MF03", "guess": "human", "model_score": 0.0, "style_score": 0.65, "combined_score": 0.195, "label": "This reads like it was written by a person. Our automated check found nothing that suggests it was produced by an AI tool.", "status": "decided", "phrase_score": 0.0, "verified_human": false}
+{"timestamp": "2026-11-07T06:20:18+00:00", "content_id": "20a23e85-6ccb-4f1c-b7e6-bda29042e5bd", "creator_id": "attacker_MF04", "guess": "human", "model_score": 0.0112, "style_score": 0.9, "combined_score": 0.2756, "label": "This reads like it was written by a person. Our automated check found nothing that suggests it was produced by an AI tool.", "status": "decided", "phrase_score": 0.0, "verified_human": false}
+{"timestamp": "2026-11-07T06:20:18+00:00", "content_id": "b09d0d67-5f9f-4747-a181-79dea03b78af", "creator_id": "attacker_MF05", "guess": "unsure", "model_score": 0.9976, "style_score": 0.65, "combined_score": 0.6938, "label": "We can't tell how this was written. Our automated check gave mixed results, which happens with a lot of genuine human writing, so we are not making any claim about it either way.", "status": "decided", "phrase_score": 0.0, "verified_human": false}
+{"timestamp": "2026-11-07T06:20:19+00:00", "content_id": "a76cafc0-af4f-43a8-85d8-e4517226c325", "creator_id": "attacker_MF06", "guess": "unsure", "model_score": 0.9969, "style_score": 0.65, "combined_score": 0.6935, "label": "We can't tell how this was written. Our automated check gave mixed results, which happens with a lot of genuine human writing, so we are not making any claim about it either way.", "status": "decided", "phrase_score": 0.0, "verified_human": false}
+{"timestamp": "2026-11-07T06:20:14+00:00", "content_id": "2a2f7c36-2fe3-43dc-9ed7-30a76f482dce", "creator_id": "attacker_EV01", "guess": "unsure", "model_score": 0.1635, "style_score": 0.8, "combined_score": 0.3806, "label": "We can't tell how this was written. Our automated check gave mixed results, which happens with a lot of genuine human writing, so we are not making any claim about it either way.", "status": "decided", "phrase_score": 0.2941, "verified_human": false}
+{"timestamp": "2026-11-07T06:20:16+00:00", "content_id": "d7d3e718-e749-42d6-9ada-d311348d843e", "creator_id": "attacker_FP04", "guess": "unsure", "model_score": 0.8329, "style_score": 0.6993, "combined_score": 0.6998, "label": "We can't tell how this was written. Our automated check gave mixed results, which happens with a lot of genuine human writing, so we are not making any claim about it either way.", "status": "decided", "phrase_score": 0.3676, "verified_human": false}
+{"timestamp": "2026-11-07T06:20:16+00:00", "content_id": "06f5f223-1319-40eb-b447-f16eb71679b8", "creator_id": "attacker_EV10", "guess": "unsure", "model_score": 0.9792, "style_score": 0.8401, "combined_score": 0.7416, "label": "We can't tell how this was written. Our automated check gave mixed results, which happens with a lot of genuine human writing, so we are not making any claim about it either way.", "status": "decided", "phrase_score": 0.0, "verified_human": false}
+{"timestamp": "2026-11-07T06:20:17+00:00", "content_id": "f6a907c2-bf67-4766-b59e-dbf42c79e3b2", "creator_id": "attacker_PI05", "guess": "unsure", "model_score": 0.6401, "style_score": 0.354, "combined_score": 0.4263, "label": "We can't tell how this was written. Our automated check gave mixed results, which happens with a lot of genuine human writing, so we are not making any claim about it either way.", "status": "decided", "phrase_score": 0.0, "verified_human": false}
 ```
 
-**The single worst outcome** — the one I'd least want to explain to a writer
-whose work got caught by it:
-
-
+**The single worst outcome:** **MF03**, a string of control characters with
+two real words in it (`\x00\x01\x02 test \x1b[31mred\x1b[0m`), got *"This reads
+like it was written by a person."* The service vouched for something that
+isn't writing at all. A writer would read that label as a judgment the system
+earned. If garbage can get it, the label tells you nothing, and that includes
+when an honest writer gets it.
 
 ---
 
