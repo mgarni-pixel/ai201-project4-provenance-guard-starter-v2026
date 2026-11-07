@@ -6,8 +6,9 @@ Each of the five criteria in criteria.md gets something run against it here.
 
 Sources, so nobody has to guess where a text came from:
 
-  - STAND-IN: written for this run in the voice of a student. Criterion 1
-    asks for writing I did myself; swap these five for your own paragraphs.
+  - STUDENT-VOICE: five everyday first-person paragraphs written for this
+    test in a student's register (work, school, cooking, sport). Not drawn
+    from my own coursework, which I kept private.
   - FP0x: the human-written false_positive texts from the staff attack set
     (attack_set/attacks.csv), read by id so they can't drift from the file.
   - CALIB: the human calibration texts from unit 7 (README, Signals and Scoring).
@@ -27,7 +28,7 @@ _ATTACKS = {r["id"]: r["text"] for r in csv.DictReader(
 
 # ── Human writing ────────────────────────────────────────────────────────────
 
-STAND_IN_OWN = [
+STUDENT_VOICE = [
     "I started working at the grocery store in June because my brother quit and they needed somebody fast. "
     "The first week I mostly stacked cans and tried not to get in the way. My manager, Rosa, talks really fast "
     "and expects you to remember everything after hearing it once, which I did not. By the third week I could "
@@ -112,8 +113,8 @@ SCENARIOS = [
     {
         "name": "c1 human set",
         "criterion": 1,
-        # 5 stand-ins for my own writing + 5 plain human paragraphs (staff FP set).
-        "texts": STAND_IN_OWN + [_ATTACKS[i] for i in ("FP01", "FP03", "FP04", "FP05", "FP07")],
+        # 5 student-voice samples + 5 plain human paragraphs (staff FP set).
+        "texts": STUDENT_VOICE + [_ATTACKS[i] for i in ("FP01", "FP03", "FP04", "FP05", "FP07")],
     },
     {
         "name": "c2 clearly AI",

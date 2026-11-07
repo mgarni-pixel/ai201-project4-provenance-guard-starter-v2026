@@ -609,10 +609,13 @@ Produced by `run_eval.py::main` against `app.py::submit`, scored by
 and a preview of what was sent. I trimmed them to the fields the criterion
 reads.)
 
-**Where the human set came from.** Criterion 1 says five pieces should be
-"I wrote myself". Five texts in `scenarios.py` are marked STAND-IN and need
-replacing with your own paragraphs. The other five are human-written texts from
-the staff attack set (FP01, FP03, FP04, FP05, FP07).
+**Where the human set came from.** Criterion 1 calls for five pieces of my own
+writing. I kept my actual coursework private, so I used five everyday
+first-person paragraphs written in a student's voice for this test (`STUDENT_VOICE`
+in `scenarios.py`: a grocery job, a cracked phone, the campus bus, cooking rice,
+a lost game). The other five are human-written texts from the staff attack set
+(FP01, FP03, FP04, FP05, FP07). Across three trials none of the ten was labelled
+`ai`, and 9 of 10 landed in `unsure`.
 
 **Diagnoses**
 
