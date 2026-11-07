@@ -669,22 +669,52 @@ every break, by stage and mechanism:
 
 ## The Improvement
 
-**What I changed:**
+**What I changed:** `app.py::submit` now refuses any text with fewer than
+**5 real words** (`MIN_REAL_WORDS`). A real word is a `\w+` run containing at
+least one letter, in any script. The request gets a 400 with
+`"error": "not_enough_words"` and a `rejected` log entry, like every other
+refusal. Arabic (MF07, 17 words) still passes, and so do the short human post
+FP08 (8 words) and EV08 (10 words). Emoji (0), punctuation runs (0), `aaaa…`
+(1) and the control-character string (3) do not.
 
-**Which diagnosis pointed at it:**
+**Which diagnosis pointed at it:** Diagnosis 1. Four of the six breaks were
+one missing check at the route, so a single fix there removes four. I picked
+it over retuning the thresholds because Diagnosis 5 showed no threshold can
+separate the staff AI essay from formal human writing. Lowering the AI
+threshold would have broken the false-positive family, which the system got
+completely right.
 
 ### Attack Run — After
 
-<!-- Same format. `run_attacks.py --label after` -->
+`python run_attacks.py --set attack_set --label after` →
+`results/attack_run_2026-11-06_2223_after.md`. Only the rows that changed are
+shown here; every other row matches the before run exactly.
 
+| ID | Targeting | Before | After | Verdict |
+|---|---|---|---|---|
+| MF03 | text is control characters | 200 human 0.195 — BROKE | **400** | **HELD** |
+| MF04 | text is only punctuation | 200 human 0.276 — BROKE | **400** | **HELD** |
+| MF05 | text is a very long single word | 200 unsure 0.694 — BROKE | **400** | **HELD** |
+| MF06 | text is emoji only | 200 unsure 0.694 — BROKE | **400** | **HELD** |
+| MF07 | right-to-left script | 200 unsure 0.648 — HELD | 200 unsure 0.648 | HELD |
+| EV05 | heavy human editing pass | human 0.244 — BROKE | human 0.244 | BROKE |
+| PI02 | instruction as system message | human 0.204 — BROKE | human 0.204 | BROKE |
 
+| | Held | Broke |
+|---|---|---|
+| Before | 50 | 6 |
+| After | **54** | **2** |
 
-**Did it help, and how do I know:**
+**Did it help, and how do I know:** Yes, for that family and nothing else.
+Four BROKE rows became 400s. The other 52 rows came back with the same
+status, guess and score to three decimals, because the check runs before any
+signal does. I also re-ran my own criteria (`results/run_2026-11-06_2224_after.md`,
+`results/appeal_check_2026-11-06_2224_after.md`): all five still met in all three
+trials, with identical scores.
 
-<!-- Widening the unsure band usually fixes one problem and creates another.
-     Reporting that trade honestly is worth full credit. -->
-
-
+The trade I made: a genuine four-word submission ("Went for a run.") is now
+refused. A writer gets a clear message to send at least five words, rather
+than a label the system can't back up on that little text.
 
 ---
 

@@ -26,6 +26,7 @@ Routes:
     GET  /health      is the service up, and is the model loaded
 """
 
+import re
 import uuid
 
 from flask import Flask, jsonify, request
@@ -224,6 +225,11 @@ def submit():
         return _reject(creator_id, "empty_text", "text is empty.")
     if len(text) > MAX_TEXT_CHARS:
         return _reject(creator_id, "text_too_long", f"text must be at most {MAX_TEXT_CHARS} characters.")
+    # Words with at least one letter, in any script — so Arabic counts, while
+    # emoji, punctuation runs, control characters and "aaaa…" don't.
+    real_words = [w for w in re.findall(r"\w+", text) if any(c.isalpha() for c in w)]
+    if len(real_words) < MIN_REAL_WORDS:
+        return _reject(creator_id, "not_enough_words", f"Send at least {MIN_REAL_WORDS} words of writing.")
 
     try:
         model_score = detector.model_signal(text)
@@ -261,6 +267,7 @@ def submit():
 
 
 MAX_TEXT_CHARS = 20_000
+MIN_REAL_WORDS = 5
 
 
 def _reject(creator_id: str, reason: str, message: str):
