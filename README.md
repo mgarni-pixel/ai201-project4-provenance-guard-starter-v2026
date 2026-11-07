@@ -571,22 +571,48 @@ when an honest writer gets it.
 
 ## Run Log and Verdicts
 
-<!-- Your five criteria across three trials. `run_eval.py --label before`. -->
+My five criteria across three trials. Text criteria: `run_eval.py --label before`
+(`results/run_2026-11-06_2223_before.md`, scenarios in `scenarios.py`).
+Criterion 4 needs a submit-then-appeal, which `run_eval.py` can't express, so I
+extended the test with `check_appeals.py` (`results/appeal_check_2026-11-06_2223_before.md`).
 
 | Criterion | Target | Run 1 | Run 2 | Run 3 | Verdict |
 |---|---|---|---|---|---|
-| 1.  |  |  |  |  |  |
-| 2.  |  |  |  |  |  |
-| 3.  |  |  |  |  |  |
-| 4.  |  |  |  |  |  |
-| 5.  |  |  |  |  |  |
+| 1. Human writing rarely called AI | ≤ 1 of 10 labelled `ai` | 0 / 10 | 0 / 10 | 0 / 10 | **MET** |
+| 2. AI vs human scores far apart | mean(AI) − mean(human) ≥ 0.30 | 0.866 − 0.294 = 0.572 | 0.572 | 0.572 | **MET** |
+| 3. All three labels reachable | each label ≥ 1 | ai 2, unsure 2, human 2 | same | same | **MET** |
+| 4. Appeals recorded, 5 of 5 | 5/5 + unknown id → 404 | 5/5, 404 | 5/5, 404 | 5/5, 404 | **MET** |
+| 5. Bad input → 400, never 500 | 6/6 400, 0 × 500, all logged | 6/6 | 6/6 | 6/6 | **MET** |
 
-**Real output from one trial**, pasted as text, naming the file and function
-that produced it:
+All three trials came back identical, to four decimal places. GPT-2 runs in
+eval mode with no sampling, so for the same text it gives the same perplexity
+every time. The "identical input can score differently" risk the brief warns
+about didn't happen on this machine. For criterion 5, 15 `rejected` entries
+with `eval_bad_*` creator ids landed in the log (5 bodies × 3 trials), plus the
+missing-creator body logged as `unknown`. `run_eval.py` can only send JSON objects, so the "no body" case is sent as a body with no `text`; a truly empty body is attack RQ09, which also got a 400.
+
+**Real output from one trial**, criterion 2, trial 1, clearly-AI scenario.
+Produced by `run_eval.py::main` against `app.py::submit`, scored by
+`scoring.py::combine_signals`:
 
 ```json
-
+[
+  {"status": 200, "guess": "ai", "confidence": 0.8798},
+  {"status": 200, "guess": "ai", "confidence": 0.8734},
+  {"status": 200, "guess": "ai", "confidence": 0.8829},
+  {"status": 200, "guess": "unsure", "confidence": 0.8395},
+  {"status": 200, "guess": "ai", "confidence": 0.8552}
+]
 ```
+
+(The report holds the full rows with `model_score`, `style_score`, the label
+and a preview of what was sent. I trimmed them to the fields the criterion
+reads.)
+
+**Where the human set came from.** Criterion 1 says five pieces should be
+"I wrote myself". Five texts in `scenarios.py` are marked STAND-IN and need
+replacing with your own paragraphs. The other five are human-written texts from
+the staff attack set (FP01, FP03, FP04, FP05, FP07).
 
 **Diagnoses**
 
