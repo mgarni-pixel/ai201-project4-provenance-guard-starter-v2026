@@ -720,17 +720,36 @@ than a label the system can't back up on that little text.
 
 ## What's Still Broken
 
-<!-- For each attack still getting through and each criterion still missed:
-     what you'd do, and why you stopped. -->
+- **PI02 and any junk-prefix attack (signal one).** Prepending anything
+  surprising (a fake header, random tokens, a block of code) drags GPT-2's
+  score down and can carry AI text into `human`. What I'd do: score the
+  text in windows and take the most AI-like window, so a bolted-on prefix
+  can't dilute the rest, or strip lines that look like markup or headers
+  before scoring. I stopped because both change what signal one measures,
+  and that needs its own calibration run against the false-positive family.
+- **EV05 (heavy human edit).** I'd leave it. Once a person has rewritten every
+  sentence, the text really has a human author, and a detector that reads the
+  final text can't see the history.
+- **EV01 near-miss.** Typos sit 0.031 above the human band. A few more typos
+  would break it. The fix belongs to the same work as PI02 (signal one treats
+  misspellings as surprise), plus spell-normalising before GPT-2 scores.
+- **The AI label can't catch the staff's AI essay (0.634).** This is the big
+  one. My phrase list misses "First / Second / Finally"-style signposting, and
+  the model signal scores formal human writing (FP02–FP06) higher than this AI
+  text. What I'd do: widen the phrase list, then calibrate the whole
+  system against a few hundred labelled texts instead of five. I stopped
+  because five hand-picked calibration texts can't support moving a threshold
+  safely. Doing it on these numbers would accuse the FP writers first.
+- **Most honest writers get `unsure`, not `human`.** 9 of 10 texts in the
+  human set land in the unsure band. Criterion 1 passes because nobody gets
+  *accused*, but I never wrote a criterion for how often a writer gets the
+  reassurance they deserve. That's a gap in my criteria, not just the code.
 
-
-
-**The trade I'd make if this ran for real:**
-
-<!-- Two sentences. Fewer wrong accusations means more AI text getting through.
-     Say which way you'd go and WHO PAYS FOR IT. -->
-
-
+**The trade I'd make if this ran for real:** I'd keep the AI threshold high and
+accept that most AI text comes back "unsure" instead of "AI". The cost of that
+choice falls on the site and on readers, who can't fully trust an unflagged
+piece. The cost of the opposite choice falls on plain, formal and
+second-language writers, who'd be told their own work was machine-made.
 
 <!-- ═════════════════════════════════════════════════════════════════════
 
