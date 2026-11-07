@@ -432,24 +432,45 @@ in the audit log under that `creator_id`.
 
 ## Rate Limiting
 
-**My limits:** ___ per minute, ___ per day
+**My limits:** 10 per minute, 200 per day, on `POST /submit`
+(`config.py::RATE_LIMIT_PER_MINUTE` / `RATE_LIMIT_PER_DAY`, the
+`@limiter.limit(...)` decorator on `app.py::submit`). Limiting is on by default
+(`RATE_LIMITING_ENABLED`).
 
-**Why those numbers and not others:**
-<!-- Think about two people: a real writer submitting their own work a few
-     times an hour, and a script sending a thousand variations to map your
-     thresholds. Your numbers have to be liveable for the first and hostile to
-     the second. -->
+**Why those numbers and not others:** A real writer submits a piece, reads the
+label, maybe fixes a typo and resubmits. That's a handful an hour, so 10 a
+minute never touches them, even someone pasting a batch of old poems. A script
+mapping my thresholds needs hundreds of variations of one text to find where
+`unsure` turns into `human`. At 10 a minute and 200 a day, one creator gets 200
+probes a day at most, and each one leaves a log line. 200 a day is still far
+above any honest writer's day.
 
-**What a caller counts as:** <!-- per address, or per creator_id? They fail
-differently — one script can look like a thousand callers, and one household
-can look like one. -->
+**What a caller counts as — per creator_id (the stretch).**
+`app.py::rate_limit_key` keys the limit on `creator_id`, and falls back to the
+caller's address only when `creator_id` is missing or isn't a string. That is
+right for the writer: a whole classroom or a family behind one home router
+shares an IP address, and a per-address limit would lock all of them out
+because of one busy person. It is wrong against an attacker who invents a new
+`creator_id` for every request. The attack set does exactly that, so its 32 text
+attacks never tripped the limit. A per-address limit fails the other way: one
+script on a botnet looks like a thousand callers. I picked per-creator because
+on a writing site a creator_id belongs to a signed-in account, so minting new
+ones costs an attacker a sign-up each time. In production the fix is both: a
+per-creator limit plus a generous per-address ceiling (say 60 a minute).
 
-**The run of status codes when I pushed past it:**
-
-<!-- python run_attacks.py --flood 15 -->
+**The run of status codes when I pushed past it** (`python run_attacks.py --flood 15`,
+`results/flood_2026-11-06_2220.md`):
 
 ```
+200 200 200 200 200 200 200 200 200 200 429 429 429 429 429
+```
 
+The attack set's own flood family (`FL01`, 12 rapid submissions from one
+creator) got the same result: 10 × 200, then 429, 429. Every 429 leaves a
+`rejected` entry in the log (`app.py::rate_limited` → `audit.log_rejection`):
+
+```json
+{"creator_id":"flood_tester","event":"rejected","limit":"10 per 1 minute","reason":"rate_limited","status":"rejected","timestamp":"2026-11-07T06:20:08+00:00"}
 ```
 
 ---
