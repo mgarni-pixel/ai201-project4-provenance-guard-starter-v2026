@@ -26,6 +26,7 @@ Routes:
     GET  /health      is the service up, and is the model loaded
 """
 
+import os
 import re
 import uuid
 
@@ -33,8 +34,14 @@ from flask import Flask, jsonify, request
 
 import audit
 import config
+import obs
 
 app = Flask(__name__)
+
+# ── Observability — UNIT 9 ────────────────────────────────────────────────────
+# One structured record per HTTP request, including the ones that fail. See
+# obs.py for the record shape and why it is a separate file from the audit log.
+obs.install(app)
 
 
 # ── Rate limiting — UNIT 8 ────────────────────────────────────────────────────
@@ -106,6 +113,7 @@ if config.RATE_LIMITING_ENABLED:
         payload = request.get_json(silent=True)
         if not isinstance(payload, dict):
             payload = {}
+        obs.note(outcome="rate_limited")
         audit.log_rejection(
             creator_id=payload.get("creator_id", "unknown"),
             reason="rate_limited",
@@ -231,17 +239,25 @@ def submit():
     if len(real_words) < MIN_REAL_WORDS:
         return _reject(creator_id, "not_enough_words", f"Send at least {MIN_REAL_WORDS} words of writing.")
 
+    # Each signal is timed separately — UNIT 9. The model signal is the one
+    # that runs GPT-2 inline, so it is the stage any latency number is really
+    # about, and a breakdown is the only way to show that rather than claim it.
     try:
-        model_score = detector.model_signal(text)
+        with obs.stage("model_signal"):
+            model_score = detector.model_signal(text)
     except ValueError:
         return _reject(creator_id, "text_too_short", "Text is too short to judge — send a few sentences at least.")
 
-    style_score = stylometry.style_signal(text)
-    phrase_score = phrases.phrase_signal(text)
-    confidence = round(scoring.combine_signals(model_score, style_score, phrase_score), 4)
-    guess, label = scoring.score_to_label(confidence)
+    with obs.stage("style_signal"):
+        style_score = stylometry.style_signal(text)
+    with obs.stage("phrase_signal"):
+        phrase_score = phrases.phrase_signal(text)
+    with obs.stage("scoring"):
+        confidence = round(scoring.combine_signals(model_score, style_score, phrase_score), 4)
+        guess, label = scoring.score_to_label(confidence)
 
     content_id = str(uuid.uuid4())
+    obs.note(content_id=content_id, outcome="decided")
     audit.log_decision(
         content_id=content_id,
         creator_id=creator_id,
@@ -272,6 +288,7 @@ MIN_REAL_WORDS = 5
 
 def _reject(creator_id: str, reason: str, message: str):
     """A refused input still leaves a trace in the log."""
+    obs.note(outcome=reason)
     audit.log_rejection(creator_id=creator_id, reason=reason)
     return jsonify({"error": reason, "message": message}), 400
 
@@ -403,6 +420,25 @@ def verify():
 
 # ── Already works ─────────────────────────────────────────────────────────────
 
+# ── Fault injection — UNIT 9, for criterion 7 only ───────────────────────────
+# Capstone criterion 7 claims that a handler which *raises* still leaves a
+# record saying so. There is no honest way to test that without a handler that
+# raises, so here is one — and it exists only when the env var says so, which
+# keeps a service started the ordinary way from carrying an endpoint whose
+# whole job is to crash.
+#
+#   AI201_FAULT_INJECTION=1 python app.py
+#
+# Deliberately not wired into /submit. A fault switch inside the real path is
+# a fault waiting to be left on.
+
+if os.getenv("AI201_FAULT_INJECTION") == "1":
+
+    @app.post("/_fault/raise")
+    def _fault_raise():
+        raise RuntimeError("fault injection: deliberate failure for criterion 7")
+
+
 @app.get("/log")
 def get_log():
     """
@@ -423,6 +459,29 @@ def main():
     print(f"  detector model:  {config.DETECTOR_MODEL}")
     print(f"  rate limiting:   {'ON' if config.RATE_LIMITING_ENABLED else 'off (unit 8)'}")
     print(f"  audit log:       {config.AUDIT_LOG}")
+    print(f"  request log:     {config.REQUEST_LOG}")
+
+    # ── The improvement — UNIT 9, MILESTONE 6 ────────────────────────────────
+    # Load GPT-2 before the first request instead of during it.
+    #
+    # The instrumentation is what found this: every cold start recorded a
+    # /submit of 4.8 to 40 seconds with 99% of it inside `model_signal`, while
+    # warm requests sat near 150 ms. The stage was the model load and the
+    # mechanism was lazy loading — `detector._load()` runs on first use, so
+    # whoever submitted first paid for everybody.
+    #
+    # Moving the load to startup doesn't make it cheaper, it moves who waits:
+    # the operator, who is already waiting for the service to come up, instead
+    # of a writer who is not.
+    if os.getenv("AI201_PRELOAD", "1") == "1":
+        import time
+
+        import detector
+        print()
+        print("  preloading the detector (AI201_PRELOAD=0 to skip)…")
+        started = time.perf_counter()
+        detector.warm_up()
+        print(f"  model ready in {(time.perf_counter() - started):.1f}s")
     print()
     print("Check it's alive:")
     print(f'  curl -X POST http://{config.HOST}:{config.PORT}/ping \\')

@@ -112,3 +112,8 @@ RATE_LIMIT_STORAGE = "memory://"
 LOG_DIR = ROOT / "logs"
 AUDIT_LOG = LOG_DIR / "audit.jsonl"
 RESULTS_DIR = ROOT / "results"
+
+# The operational log — UNIT 9. One record per HTTP request, kept apart from
+# the audit log on purpose: that one is the decision trail a reviewer reads on
+# an appeal, and mixing request noise into it would spoil both.
+REQUEST_LOG = LOG_DIR / "requests.jsonl"
