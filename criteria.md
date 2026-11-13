@@ -144,3 +144,125 @@ up the service for everyone else.
      A number you missed stays where it is, gets diagnosed, and gets a fix
      attempted. That's where the points are.
      ───────────────────────────────────────────────────────────────────────── -->
+
+---
+
+# Capstone criteria — Unit 9
+
+<!-- TODO (Manuel): these five were DRAFTED, not written by you. Milestone 4
+     says the criteria must be yours and that a criterion you didn't write is
+     one you can't defend. Rewrite each sentence and each reason in your own
+     words — keep, tighten or loosen the numbers as you see fit — then delete
+     this comment. The runner reads its targets from capstone_targets.py, so
+     change a number there too if you change one here. -->
+
+Five criteria for the capstone extension — the observability layer added in
+unit 9. Written before any of the capstone test runs.
+
+**Four of the five are about the extension.** The fifth is a regression check:
+an extension that breaks what it extends is a regression, and the point of
+instrumenting a service is to learn about it without changing what it decides.
+
+The cold-start measurement in Milestone 3 came before these, which is the order
+the brief sets — Milestone 3 measures the cost, Milestone 4 writes the
+criteria. So the latency targets below are informed by a measured warm median
+of about 147 ms and a cold start between 9 and 40 seconds, and I say so rather
+than pretending the numbers came from nowhere.
+
+---
+
+## 6. Every request leaves exactly one complete record
+
+Across one trial of 30 requests to the service — a mix of `/submit`,
+`/appeal`, `/content/<id>`, `/health` and one call to a URL that doesn't
+exist — `logs/requests.jsonl` gains **exactly 30 records**, and **30 of 30**
+carry all eleven fields (`timestamp`, `request_id`, `method`, `route`,
+`status`, `duration_ms`, `creator_id`, `content_id`, `outcome`, `stages`,
+`exception`), with `null` where a field doesn't apply. This holds in **each**
+of three trials.
+
+**Why this target:** Thirty of thirty, not twenty-nine. This is the criterion
+the whole extension rests on — every later claim about latency, cost or
+failure reads its numbers out of this file, so a log that drops one request in
+thirty makes every other number in the submission approximate in a way I
+couldn't quantify. One shape for every record is part of the same point: a
+file I have to parse two ways is one I will eventually parse wrongly. The
+unknown URL is in the set deliberately, because a request that matches no
+route is the case most likely to slip past a hook that assumes one did.
+
+---
+
+## 7. A request that fails is recorded as having failed
+
+For seven deliberately broken requests — the six bad inputs from criterion 5
+(no text, text missing, text empty, text not a string, creator_id missing,
+text over 20,000 characters) plus one request that makes a handler raise —
+**7 of 7** leave a record whose `outcome` names the failure rather than
+reading `ok`. The six bad inputs record `status` 400 and an `outcome` matching
+the error code in the response body; the raising request records `status` 500
+and the exception's type name in `exception`. **0 of 7** are recorded as
+successes. This holds in **each** of three trials.
+
+**Why this target:** Seven of seven because a failure recorded as a success is
+worse than no record at all — it is a number that will be quietly wrong in
+every count I make afterwards, and nothing about it looks wrong. Unit 8's
+audit log already proved the version of this that matters for attacks: a
+rejection that leaves no trace looks exactly like a quiet afternoon. The
+raising request is included because that path is the one Flask handles
+differently — the response is finalized before the exception reaches teardown,
+so an instrumentation layer can report a 500 with `outcome: "ok"` and look
+fine while being useless.
+
+---
+
+## 8. A warm submission answers in under 250 ms
+
+Over 10 consecutive `/submit` requests after the model is already loaded, the
+**median** `duration_ms` recorded by the service is **under 250 ms**, and
+**at least 9 of 10** individual runs are under 400 ms. Measured warm only —
+the first submission after a start is excluded and covered by what the README
+says about cold starts. This holds in **each** of three trials.
+
+**Why this target:** 250 ms is a little under twice the measured warm median,
+which leaves room for an ordinary laptop doing other things without passing
+anything that would feel slow to a person waiting on a verdict. I state warm
+explicitly because the brief warns that a latency criterion which doesn't say
+warm or cold has measured something its author didn't intend, and on this
+service the gap is roughly three hundred to one — a target that silently
+included the cold start would describe neither case. The median rather than the
+mean, because one 9-second cold run would drag a mean of ten past any target I
+could defend while nine of the ten were fine.
+
+---
+
+## 9. The log survives ten times the normal rate
+
+With 50 `/submit` requests issued at roughly ten times the pace of
+criterion 8 — ten at a time rather than one after another — the log gains
+**exactly 50 records**, **0** lines fail to parse as JSON, and **50 of 50**
+carry a distinct `request_id`. This holds in **each** of three trials.
+
+**Why this target:** Appending from several threads at once is where a log
+like this actually breaks, and it breaks by interleaving two half-written
+lines into one unparseable row — which takes out not just the two requests
+involved but my ability to read the file at all. Zero malformed lines is the
+only target worth setting, because one is already a corrupted evidence trail.
+Distinct ids matter because the only way I match a measurement back to a
+request is by that id, and a duplicate would silently merge two runs into one.
+Ten at a time is a modest load, and that is the point: if it fails here it
+would certainly fail anywhere real.
+
+---
+
+## 10. The extension changed nothing about the verdicts
+
+Unit 7's criterion 2, re-run against the instrumented service: the mean
+combined score of the 5 clearly-AI texts is **at least 0.30 higher** than the
+mean combined score of the 5 clearly-human texts, in **each** of three trials.
+
+**Why this target:** Same target as the original on purpose — a regression
+check is only a check if the bar doesn't move. The observability layer wraps
+the three signals in timers and writes a second log file, and neither of those
+should be able to touch a score. If this one misses, the extension broke the
+system it was supposed to be watching, and that outranks everything else in
+this submission.
