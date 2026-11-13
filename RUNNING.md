@@ -306,3 +306,129 @@ is evidence, and the entries you paste into your README are what unit 8 grades.
 
 **Do not delete and recreate this repository.** You submit the same URL both
 units.
+
+---
+
+## The capstone run path — Path B, local with logs
+
+This is the run path for the unit 9 submission. Path B, for the reason the
+section above already gives: the model does not fit a free host.
+
+### The one command
+
+From a fresh checkout, into a virtual environment of its own — not the
+machine's system Python, for the reason in "Tested from a clean tree" below:
+
+```bash
+python -m venv .venv && . .venv/Scripts/activate && pip install -r requirements.txt
+```
+
+Then, every time:
+
+```bash
+AI201_DEBUG=0 AI201_PRELOAD=1 python app.py
+```
+
+On Windows PowerShell, where inline variables aren't a thing:
+
+```powershell
+$env:AI201_DEBUG=0; $env:AI201_PRELOAD=1; python app.py
+```
+
+Startup prints the two log paths and then loads the detector before it binds,
+so the service answers `/health` with `"detector_loaded": true` from the first
+request rather than making the first caller wait. It takes about six seconds
+to come up for that reason. `AI201_PRELOAD=0` gives the old lazy behaviour
+back.
+
+To run the capstone test set you also need the fault-injection route, which is
+off by default:
+
+```bash
+AI201_DEBUG=0 AI201_FAULT_INJECTION=1 python app.py
+python run_capstone_eval.py --label before   # in another terminal
+python measure_cost.py --runs 10
+python test_obs.py                           # no server needed
+```
+
+### gunicorn does not run on this machine
+
+The section above suggests `gunicorn app:app`, and `gunicorn` is pinned in
+`requirements.txt`. It installs on Windows and then cannot start:
+
+```
+File ".venv\Lib\site-packages\gunicorn\util.py", line 7, in <module>
+    import fcntl
+ModuleNotFoundError: No module named 'fcntl'
+```
+
+`fcntl` is POSIX-only, and gunicorn has no Windows support — this isn't a
+missing package, it's the wrong server for the platform. A WSGI server that
+does work here is `waitress`, which would be a new dependency in a file that
+pins everything deliberately, and it buys nothing this submission needs: Path
+B asks for a documented single command and a record of the service running,
+and `python app.py` with debug off is both. So the run path is Flask's own
+server with `AI201_DEBUG=0`, and this paragraph is the honest note about why.
+
+### What the environment needs
+
+| What | Version / size |
+|---|---|
+| Python | 3.13.14 (the pinned range is 3.11–3.13, **not** 3.14) |
+| Dependencies | `pip install -r requirements.txt` — Flask 3.1.3, Flask-Limiter 3.12, requests 2.34.2, transformers 4.57.6, torch 2.15.0 |
+| Model files | `gpt2`, about 550 MB, downloaded once into the Hugging Face cache (`~/.cache/huggingface/hub/models--gpt2`). No key, no account |
+| Disk for logs | `logs/requests.jsonl` grows about 300 bytes per request |
+| Ports | 5000 on loopback |
+
+### Tested from a clean tree
+
+The capstone work isn't committed yet, so `git clone` would have fetched the
+unit 8 code rather than this. Instead the working tree was copied into an
+empty folder with `.venv`, `.git`, `logs/`, `results/` and `__pycache__`
+excluded — the same thing a fresh checkout gives you — and then run from
+there. What happened, in order:
+
+1. `python app.py` on the machine's system Python:
+
+   ```
+   File "...\cleanco\app.py", line 77, in <module>
+       from flask_limiter import Limiter
+   ModuleNotFoundError: No module named 'flask_limiter'
+   ```
+
+   Not the error I expected. The system Python already had `flask`, so the
+   first thing to break was unit 8's dependency rather than the obvious one —
+   which is worse than an empty interpreter, because it fails forty lines into
+   the file instead of on the first import. A reader who has *some* of these
+   packages gets the most confusing version of this failure. That is why
+   `pip install -r requirements.txt` into a fresh virtual environment now sits
+   **above** the run command on this page instead of being assumed.
+
+2. Re-run with the project's virtual environment interpreter. `python
+   test_obs.py` passed all 21 checks from the clean tree, and the service came
+   up with `AI201_PRELOAD=1`, reporting `"detector_loaded": true` and
+   `"log_entries": 0`. The preload read the model out of the Hugging Face
+   cache in the user's home directory, **not** from the repository — so on a
+   machine that has never run this project the first start downloads 550 MB
+   and takes minutes rather than six seconds.
+
+3. `logs/` did not exist in the clean tree. It was created on the first
+   request, and the first line of `logs/requests.jsonl` was the `/health`
+   call. Nothing had to be made by hand.
+
+4. A real `/submit` answered with an `unsure` verdict and a `content_id`, so
+   the whole path — route, three signals, scoring, both logs — works from a
+   tree with no state in it.
+
+### The two logs, and why there are two
+
+| File | One line is | Written by |
+|---|---|---|
+| `logs/audit.jsonl` | one *decision*, or a refusal — the trail a reviewer reads on an appeal | `audit.py` |
+| `logs/requests.jsonl` | one *HTTP request*, whatever happened to it | `obs.py` |
+
+They are separate on purpose. The audit log is graded evidence from units 7
+and 8 and is what a writer's appeal gets reviewed against; appending
+operational noise to it would spoil both uses. Request records carry no
+submitted text — that is already in the audit trail, and a second copy is a
+second place it can leak from.
