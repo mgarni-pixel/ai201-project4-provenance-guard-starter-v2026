@@ -790,3 +790,380 @@ second-language writers, who'd be told their own work was machine-made.
 ---
 
 📖 **How to run this project: [RUNNING.md](RUNNING.md)**
+
+---
+
+## Capstone
+
+<!-- TODO (Manuel): one thing in here is still DRAFTED and must become yours
+     before you submit — the five criteria in criteria.md. Milestone 4 says a
+     criterion you didn't write is one you can't defend, and the numbers are
+     mirrored in capstone_targets.py, so change both if you change one.
+     Everything else below is measured output from runs that really happened;
+     the result files in results/ are the originals. Delete this comment once
+     the criteria are yours. -->
+
+**What This Extends**
+
+Project 4, **Provenance Guard** — the Flask safety service from units 7 and 8
+that scores a piece of text on three signals, labels it, logs the decision and
+takes appeals. Same repository, same system, no new project.
+
+What's new is an **observability layer**: a second structured log that records
+one entry per HTTP request rather than per decision, with per-stage timings
+inside the request, a measured cost-per-run figure taken from those timings,
+and a documented single-command run path that a stranger can follow. New files
+are `obs.py` (the layer), `measure_cost.py` (the cost measurement),
+`run_capstone_eval.py` and `capstone_targets.py` (the test harness) and
+`test_obs.py` (a self-check for the layer). `app.py` gained the request hooks,
+per-signal timers, a startup preload and a fault-injection route that is off
+unless an environment variable turns it on. `config.py` gained one path.
+
+Nothing about the detector, the signals, the weights, the thresholds, the
+labels or the appeal path was touched. That was the point — criterion 10
+checks it.
+
+**The Shape**
+
+**Shape A — deploy and instrument.** The extension *is* the operational layer:
+the run path, the instrumentation, and the numbers that come out of it.
+
+I picked A over C because the two things the brief requires in every shape —
+a run path that isn't an editor and a structured log — are the two things this
+service had least of. It wrote a decision trail from unit 7 and had no idea
+how long anything took, what a request cost, or whether a request that never
+became a decision happened at all. Adding a fourth signal (shape C) would have
+been a more impressive sentence and a less honest answer to "can you see what
+this is doing."
+
+What I decided is **out of scope**, having thought about each one:
+
+- **No fourth detection signal.** It would change what the system decides,
+  which makes the regression check meaningless and turns one unit into two.
+- **No hosting on Render.** Not a time problem — an arithmetic one. `torch`
+  plus the `gpt2` weights are over a 512 MB free tier before a request
+  arrives, and RUNNING.md has the table. Path B is the right answer here and
+  the rubric treats it the same.
+- **No dashboard or metrics UI.** A log you can read with `json.loads` answers
+  the questions I wrote criteria about. A chart would be a second project.
+- **No swap to a production WSGI server.** `gunicorn` is pinned in
+  `requirements.txt` and cannot run on Windows at all — it imports `fcntl`.
+  Replacing it with `waitress` means a new dependency in a file that pins
+  everything on purpose, and buys nothing Path B asks for. RUNNING.md records
+  the attempt and the traceback instead.
+
+**Running It**
+
+**Path B — local, with logs.** The full run path, the environment it needs,
+the gunicorn finding and the clean-tree test are in
+[RUNNING.md](RUNNING.md#the-capstone-run-path--path-b-local-with-logs). The
+short version:
+
+```bash
+python -m venv .venv && . .venv/Scripts/activate && pip install -r requirements.txt
+AI201_DEBUG=0 AI201_PRELOAD=1 python app.py
+```
+
+Startup loads the detector before it binds, so `/health` reports
+`"detector_loaded": true` from the first request. It takes about six seconds
+to come up for that reason — see The Improvement.
+
+**Instrumentation**
+
+Two logs, deliberately separate. `logs/audit.jsonl` is unit 7's decision trail
+— what the service concluded, and the record a reviewer reads when a writer
+appeals. `logs/requests.jsonl` is new: one record per HTTP request, whatever
+became of it. Mixing them would spoil both, because the audit log is graded
+evidence whose shape unit 8's tooling depends on.
+
+Each request record holds eleven fields, every one present on every record and
+`null` where it doesn't apply, so the file has exactly one shape:
+
+| Field | What it holds |
+|---|---|
+| `timestamp` | when the request finished, UTC, to the millisecond |
+| `request_id` | a short id, also returned to the caller in `X-Request-ID` |
+| `method` | `GET` or `POST` |
+| `route` | the matched rule (`/content/<content_id>`), not the filled-in path, so records group |
+| `status` | the HTTP status actually sent |
+| `duration_ms` | the whole request, measured around the handler |
+| `creator_id` | who called, when the body carried one |
+| `content_id` | the decision this produced, when it produced one |
+| `outcome` | `decided`, `ok`, `error`, or the error code the handler chose |
+| `stages` | per-stage milliseconds inside the handler |
+| `exception` | the exception's type name, when the handler raised |
+
+The submitted text is **not** copied here. It is already in the audit trail,
+and a second copy in an operational log is a second place it can leak from.
+
+Twelve entries from real runs, one of each kind the service produces. Taken
+from `logs/requests.jsonl`, written by `obs.py::_write`, and also saved as
+`results/log_extract.json`:
+
+```json
+{"timestamp": "2026-11-13T03:31:50.750+00:00", "request_id": "a64355882000", "method": "POST", "route": "/submit", "status": 200, "duration_ms": 154.76, "creator_id": "c10_hu_193148852126_4", "content_id": "9df6468b-8127-40b2-9b8a-ad0159a8a88d", "outcome": "decided", "stages": {"model_signal": 118.48, "style_signal": 0.41, "phrase_signal": 0.33, "scoring": 0.01}, "exception": null}
+{"timestamp": "2026-11-13T03:30:31.943+00:00", "request_id": "a6a766a995d3", "method": "POST", "route": "/submit", "status": 200, "duration_ms": 4775.14, "creator_id": "cost_193027_1", "content_id": "3b2835e5-a53e-4f5b-9ccc-d9bbefc97fa1", "outcome": "decided", "stages": {"model_signal": 4748.4, "style_signal": 0.8, "phrase_signal": 0.61, "scoring": 0.01}, "exception": null}
+{"timestamp": "2026-11-13T03:31:44.716+00:00", "request_id": "6ad0024ac92c", "method": "POST", "route": "/submit", "status": 200, "duration_ms": 591.78, "creator_id": "c9_193144109300_3", "content_id": "c4862bde-ab20-445e-a612-26a582462828", "outcome": "decided", "stages": {"model_signal": 525.16, "style_signal": 0.41, "phrase_signal": 0.36, "scoring": 0.01}, "exception": null}
+{"timestamp": "2026-11-13T03:31:48.541+00:00", "request_id": "15de04b02bfa", "method": "POST", "route": "/submit", "status": 200, "duration_ms": 1009.91, "creator_id": "c9_193144109300_43", "content_id": "ffa50473-a124-470f-ad0a-9d2c2924f2fe", "outcome": "decided", "stages": {"model_signal": 960.18, "style_signal": 0.46, "phrase_signal": 0.36, "scoring": 0.01}, "exception": null}
+{"timestamp": "2026-11-13T03:31:42.355+00:00", "request_id": "9a45b679ca61", "method": "POST", "route": "/submit", "status": 400, "duration_ms": 1.5, "creator_id": "cap_bad_number", "content_id": null, "outcome": "missing_text", "stages": {}, "exception": null}
+{"timestamp": "2026-11-13T03:31:42.386+00:00", "request_id": "3238f5b066d4", "method": "POST", "route": "/submit", "status": 400, "duration_ms": 1.47, "creator_id": "cap_bad_huge", "content_id": null, "outcome": "text_too_long", "stages": {}, "exception": null}
+{"timestamp": "2026-11-13T03:31:42.370+00:00", "request_id": "894eb294ff34", "method": "POST", "route": "/submit", "status": 400, "duration_ms": 1.42, "creator_id": null, "content_id": null, "outcome": "missing_creator_id", "stages": {}, "exception": null}
+{"timestamp": "2026-11-13T03:31:42.402+00:00", "request_id": "8031c9ef5f1d", "method": "POST", "route": "/_fault/raise", "status": 500, "duration_ms": 1.18, "creator_id": null, "content_id": null, "outcome": "error", "stages": {}, "exception": "RuntimeError"}
+{"timestamp": "2026-11-13T03:31:42.139+00:00", "request_id": "5ed154173949", "method": "POST", "route": "/appeal", "status": 200, "duration_ms": 19.15, "creator_id": null, "content_id": null, "outcome": "ok", "stages": {}, "exception": null}
+{"timestamp": "2026-11-13T03:31:42.216+00:00", "request_id": "0090cd75f88b", "method": "GET", "route": "/content/<content_id>", "status": 200, "duration_ms": 16.14, "creator_id": null, "content_id": null, "outcome": "ok", "stages": {}, "exception": null}
+{"timestamp": "2026-11-13T03:31:42.264+00:00", "request_id": "1fb9a92747bd", "method": "GET", "route": "/health", "status": 200, "duration_ms": 4.04, "creator_id": null, "content_id": null, "outcome": "ok", "stages": {}, "exception": null}
+{"timestamp": "2026-11-13T03:31:42.268+00:00", "request_id": "c50cc906f368", "method": "GET", "route": "/no-such-route-193139272296", "status": 404, "duration_ms": 0.25, "creator_id": null, "content_id": null, "outcome": "ok", "stages": {}, "exception": null}
+```
+
+**Four failed runs are in there on purpose.** Three are refusals — `status`
+400 with `outcome` naming which check rejected the input (`missing_text`,
+`text_too_long`, `missing_creator_id`) and `stages` empty, because the request
+never reached a signal. The fourth is a handler that raised: `status` 500,
+`outcome: "error"`, `exception: "RuntimeError"`, from the fault-injection route
+that exists only when `AI201_FAULT_INJECTION=1`. Criterion 7 is about exactly
+these, and a crash recorded as a success would be worse than no record at all.
+
+Two entries are worth reading side by side. The 4775 ms one is a cold start,
+with 4748 ms of it inside `model_signal` — 99.4%. The 154 ms one is the same
+work warm. The 1009 ms one is a warm request during the 10-at-a-time load of
+criterion 9, where contention for the CPU stretched the same stage to 960 ms.
+None of that was visible before this unit.
+
+**What It Costs**
+
+Nothing here calls a paid API. All three signals run on this machine — GPT-2
+through `transformers`, and two pure-Python passes — so the real cost of a run
+is **seconds of compute**, and that is what I measured.
+
+**Measured: 0.118 seconds of compute per warm run.**
+
+How I got it, which is `measure_cost.py::main`: it sends 10 submissions of one
+fixed text, one at a time, each with its own `creator_id` so the per-creator
+rate limit never fires, then reads each request's duration back out of
+`logs/requests.jsonl` by matching the `X-Request-ID` the service returned. The
+durations are therefore the service's own measurements, not timings taken from
+the client, so curl and loopback overhead are not in the number. The run is
+`results/cost_2026-11-12_1935_final.md`:
+
+| | ms |
+|---|---|
+| mean | 117.69 |
+| median | 116.69 |
+| min | 105.58 |
+| max | 131.76 |
+| mean `model_signal` | 89.18 — **75.8% of a run** |
+
+The first request after a start is excluded and reported separately, because
+it carries the one-time model load and is not a per-run cost. Averaging it in
+would give a number describing neither a cold run nor a warm one.
+
+**A hundred submissions a day**: 100 × 0.118 s = **11.8 seconds of compute per
+day**. On one laptop core that is free in money and unnoticeable in time; what
+it actually buys is headroom. A hundred a day is 0.0014 requests per second,
+and the service handled 10 concurrent requests in criterion 9 with the slowest
+at 1.01 s, so the limit here is nowhere near arithmetic — it is the 550 MB of
+resident model that stops this fitting a free host at all.
+
+One honest note on the cold start: it is not a stable number. Measured across
+restarts it ran 39.9 s the very first time, then 9.1 s, then 4.8 s as the
+operating system's file cache warmed. Any claim about it is a range, not a
+figure.
+
+**Run Log and Verdicts**
+
+Five criteria, three trials each, produced by `run_capstone_eval.py::main`
+with targets read from `capstone_targets.py`. Full output with per-trial
+measurements is in `results/capstone_run_2026-11-12_1929_before.md`.
+
+| Criterion | Target | Run 1 | Run 2 | Run 3 | Verdict |
+|---|---|---|---|---|---|
+| 6. Every request leaves exactly one complete record | 30 of 30, all 11 fields | 30/30 | 30/30 | 30/30 | MET |
+| 7. A request that fails is recorded as having failed | 7 of 7 as failures, 0 as ok | 7/7 | 7/7 | 7/7 | MET |
+| 8. A warm submission answers in under 250 ms | median < 250 ms, 9 of 10 < 400 ms | 149.57 ms | 150.13 ms | 154.0 ms | MET |
+| 9. The log survives ten times the normal rate | 50 records, 0 malformed, 50 distinct ids | 50/50, 0 bad | 50/50, 0 bad | 50/50, 0 bad | MET |
+| 10. The extension changed nothing about the verdicts | AI mean − human mean ≥ 0.30 | 0.4837 | 0.4837 | 0.4837 | MET |
+
+Real output, criterion 7, trial 1, from `run_capstone_eval.py::criterion_7`:
+
+```json
+{
+  "requests_sent": 7,
+  "fault_route_available": true,
+  "response_statuses": [400, 400, 400, 400, 400, 400, 500],
+  "records_gained": 7,
+  "recorded_as_failure": 7,
+  "recorded_as_ok": 0,
+  "status_400_records": 6,
+  "status_500_records": 1,
+  "500s_naming_exception": 1,
+  "passed": true
+}
+```
+
+**All five met, so the honest question is whether the targets were low.** Two
+of them were, and one was not.
+
+- **Criterion 8 was too loose.** I set 250 ms against a measured warm median
+  of about 147 ms — nearly 1.7× headroom, so the target could only have failed
+  if something went badly wrong rather than slightly wrong. It never came
+  within 60% of the line in six trials across both runs.
+- **Criterion 10 is loose by construction and I'd keep it.** It re-uses unit
+  7's target deliberately: a regression check works only if the bar doesn't
+  move, and the measured separation of 0.4837 against a 0.30 target is the
+  margin the original criterion already had. Tightening it would make it a
+  different criterion rather than a stricter one.
+- **Criteria 6, 7 and 9 are at their floors.** 30 of 30, 0 recorded as ok, 0
+  malformed lines. There is no stricter version of "no record is missing" — the
+  only way these get harder is a larger or nastier set of requests, not a
+  different number, and that is the thing I'd change rather than the target.
+
+Nothing was missed, so there is no stage-and-mechanism diagnosis to write
+under this table. The one diagnosis this unit produced came out of the
+instrumentation rather than a failed criterion, and it is in The Improvement.
+
+**The Improvement**
+
+**What I changed:** `app.py::main` now calls `detector.warm_up()` at startup,
+before the server binds, so GPT-2 is loaded before the first request instead
+of during it. Gated by `AI201_PRELOAD`, default on. Nine lines.
+
+**The diagnosis it followed.** This came from the request log, not from a
+missed criterion. Every cold start recorded a `/submit` between 4.8 and 39.9
+seconds with 99.4% of the duration inside the `model_signal` stage, against a
+warm median near 150 ms. **The stage is the model load and the mechanism is
+lazy loading**: `detector._load()` runs on first use, so whichever request
+arrived first paid for every request after it. The function to fix it already
+existed — `detector.warm_up()`, shipped in the starter and called by nothing.
+
+The fix does not make the load cheaper. It moves who waits: the operator, who
+is already waiting for the service to come up, instead of a writer who is not.
+Startup goes from instant to about six seconds, which is the cost, and
+RUNNING.md says so.
+
+**Before and after, each measured on a freshly restarted service** —
+`results/cost_2026-11-12_1930_coldstart_before.md` and
+`results/cost_2026-11-12_1931_coldstart_after.md`:
+
+| | First `/submit` after start |
+|---|---|
+| Before | **4775.14 ms** (4748 ms in `model_signal`) |
+| After | **310.92 ms** |
+
+**15× faster on the first request.** And the full criterion set, re-run three
+trials in the same format — `results/capstone_run_2026-11-12_1931_after.md`:
+
+| Criterion | Target | Run 1 | Run 2 | Run 3 | Verdict |
+|---|---|---|---|---|---|
+| 6. Every request leaves exactly one complete record | 30 of 30, all 11 fields | 30/30 | 30/30 | 30/30 | MET |
+| 7. A request that fails is recorded as having failed | 7 of 7 as failures, 0 as ok | 7/7 | 7/7 | 7/7 | MET |
+| 8. A warm submission answers in under 250 ms | median < 250 ms, 9 of 10 < 400 ms | 106.34 ms | 112.45 ms | 140.89 ms | MET |
+| 9. The log survives ten times the normal rate | 50 records, 0 malformed, 50 distinct ids | 50/50, 0 bad | 50/50, 0 bad | 50/50, 0 bad | MET |
+| 10. The extension changed nothing about the verdicts | AI mean − human mean ≥ 0.30 | 0.4837 | 0.4837 | 0.4837 | MET |
+
+**Did it help?** Yes, and slightly more than I expected. The cold start was the
+target and it fell 15×. Criterion 8's warm median also improved, from
+149.57/150.13/154.0 ms to 106.34/112.45/140.89 ms — about 25% — which I did
+not predict and can only partly explain: the model's pages are fully resident
+before any request arrives, so warm requests stop competing with a first
+request that is still faulting weights in from disk. Criterion 10 came out
+identically to four decimal places, which is the result I wanted there: the
+change moved when work happens, not what the service decides.
+
+**The trade.** Startup is now six seconds slower, and `AI201_PRELOAD=0`
+restores the old behaviour for anyone who wants a fast start and is willing to
+make the first caller pay.
+
+**What's Still Broken**
+
+Every criterion was met, so this section is about what the targets didn't ask
+and what I found anyway.
+
+**The target I'd tighten, and to what.** Criterion 8, from "median under
+250 ms" to **"median under 150 ms and 10 of 10 under 250 ms"**. The measured
+median after the improvement is 106–141 ms, so 150 ms is a real line rather
+than a formality, and moving the per-run clause from 9-of-10-under-400 to
+10-of-10-under-250 removes the free pass for one slow run. I would not have
+set that before measuring, which is the honest reason it isn't the target
+above.
+
+**The one thing I'd do first.** A request that matched no route is recorded
+with `status: 404` and `outcome: "ok"` — visible in the twelfth log entry
+above. `outcome` defaults to `"ok"` for anything that didn't raise, and only
+handlers that call `obs.note()` say otherwise, so every 404 and every error
+produced by Flask rather than by my code reads as a success. Criterion 7 did
+not catch it because all seven of its requests go through handlers that do
+call `note()`. The fix is three lines — derive the default from the status code
+instead of from whether an exception fired — and I'd do it first because it is
+the one case where this log currently says something untrue, and the whole
+extension rests on the log being trustworthy.
+
+**What else is left, and why I stopped.**
+
+- **Per-run cost isn't a field in the log.** It is computed afterwards by
+  `measure_cost.py` from `duration_ms`. Writing it into each record would let
+  anyone read the cost of a single request without re-deriving it. I stopped
+  because the criteria I wrote are answerable from the timings as they are,
+  and adding a field changes the record shape that criterion 6 checks.
+- **In-memory rate limiting still forgets everything on restart.** Unit 8
+  named this and it is still true; the storage backend is `memory://`. Out of
+  scope on purpose — it needs Redis, which is a dependency and a service.
+- **The load observation is 10 concurrent, not sustained.** Criterion 9 fires
+  50 requests ten at a time and the log holds up, but nothing here runs for an
+  hour. A slow leak or a log that degrades at the millionth line would not
+  show up in a 50-request burst.
+- **Nothing is hosted.** Path B by arithmetic, not by preference, and
+  RUNNING.md has the memory table. The consequence is that no claim in this
+  submission covers a sleeping instance, a cold container or a network hop.
+
+**If this were real and I had another unit**, the one thing I'd do first is
+make the log answer "was the decision any good" rather than only "did the
+request finish." Right now I can prove the service is fast and that it records
+everything; I cannot query, from the logs alone, how often it labels a human
+as AI — the thing the whole system exists to get right and the thing unit 7's
+criterion 1 says costs a real person the most when it goes wrong. That means
+joining the request log to the audit log on `content_id` and keeping a running
+false-positive rate over the appeals that get upheld. Everything else here is
+plumbing by comparison.
+
+**How I Used AI**
+
+**Moment 1**
+
+- *What I asked for:* Request-level logging that would record a handler which
+  raised, with the exception's type, and a self-check alongside it to prove the
+  recording worked.
+- *What came back:* An `obs.py` hooking `before_request`, `after_request` and
+  `teardown_request`, with the exception captured in the teardown hook. It read
+  correctly and it was wrong: two of the self-check's 21 assertions failed,
+  because the record for a raising handler came out `status: 500` but
+  `outcome: "ok"` and `exception: null`.
+- *What I changed:* Flask turns an uncaught exception into a 500 and then
+  finalizes that response, so `after_request` runs and writes the record before
+  `teardown_request` is ever handed the exception. I moved the capture onto the
+  `got_request_exception` signal, which fires while the exception is still in
+  hand, and kept teardown as the fallback for when the response is never
+  finalized at all. The only reason this surfaced is that the test was asked
+  for in the same breath as the code — without it every crash would have been
+  logged as a success, and criterion 7 would have passed while measuring
+  nothing.
+
+**Moment 2**
+
+- *What I asked for:* The Path B run path written into `RUNNING.md`, including
+  the milestone's step about cloning into a new folder and following my own
+  instructions.
+- *What came back:* A section headed "Tested from a clean checkout" reporting a
+  first failure of `ModuleNotFoundError: No module named 'flask'` and two
+  further steps — plausible, fluent, and the output of nothing. No clean
+  checkout had been made.
+- *What I changed:* I ran it. The real first failure was
+  `ModuleNotFoundError: No module named 'flask_limiter'` at `app.py` line 77,
+  because this machine's system Python already had `flask` — a worse failure
+  than the invented one, since it breaks forty lines into the file rather than
+  on the first import, and it is the version a reader with some of the packages
+  actually hits. I rewrote the section from the real transcript, moved
+  `pip install -r requirements.txt` above the run command because of it, and
+  recorded that the copy was of the working tree rather than a `git clone`,
+  since this unit's work wasn't committed when the test ran. The lesson I'm
+  keeping is that a generated write-up will describe a test it never ran, and
+  the tell is that it reads better than real output does.
